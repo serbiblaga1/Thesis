@@ -54,7 +54,7 @@ def get_args():
         {"name": "--headless", "action": "store_true", "default": False, "help": "Force display off at all times"},
         {"name": "--horovod", "action": "store_true", "default": False, "help": "Use horovod for multi-gpu training"},
         {"name": "--rl_device", "type": str, "default": "cuda:0", "help": 'Device used by the RL algorithm, (cpu, gpu, cuda:0, cuda:1 etc..)'},
-        {"name": "--num_envs", "type": int, "default": 1, "help": "Number of environments to create. Overrides config file if provided."},
+        {"name": "--num_envs", "type": int, "default": 100, "help": "Number of environments to create. Overrides config file if provided."},
         {"name": "--seed", "type": int, "default": 1, "help": "Random seed. Overrides config file if provided."},
         {"name": "--play", "required": False, "help": "only run network", "action": 'store_true'},
 
@@ -134,7 +134,7 @@ class RecordEpisodeStatisticsTorch(gym.Wrapper):
         return observations
 
     def step(self, action):
-        observations, privileged_observations, rewards, dones, infos = super().step(action)
+        observations, privileged_observations, rewards, dones, infos, vel = super().step(action)
         
         self.episode_returns += rewards
         self.episode_lengths += 1
@@ -187,8 +187,14 @@ class Agent(nn.Module):
         probs = Normal(action_mean, action_std)
         if action is None:
             action = probs.sample()
-        return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
 
+        if not isinstance(action, torch.Tensor):
+            action = torch.tensor(action, dtype=torch.float32, device=x.device) 
+
+        full_action = torch.zeros((action.shape[0], 4), device=x.device)  
+        full_action[:, 0] = action[:, 0] * 0.01
+        return full_action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
+    
 
 if __name__ == "__main__":
     args = get_args()
@@ -279,7 +285,7 @@ if __name__ == "__main__":
                     values[step] = value.flatten()
                 actions[step] = action
                 logprobs[step] = logprob
-
+                
                 # TRY NOT TO MODIFY: execute the game and log data.
                 next_obs, rewards[step], next_done, info = envs.step(action)
                 if 0 <= step <= 2:

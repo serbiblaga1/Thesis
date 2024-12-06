@@ -161,7 +161,7 @@ class Agent(nn.Module):
         )
         self.actor_mean = nn.Sequential(
             layer_init(nn.Linear(np.prod(envs.observation_space.shape), 256)),
-            nn.ReLU(),
+            nn.Tanh(),
             layer_init(nn.Linear(256, 256)),
             nn.Tanh(),
             layer_init(nn.Linear(256, 1), std=0.01),
@@ -295,6 +295,10 @@ def train_altitude_control(env, agent, args):
     logprobs = torch.zeros((args.num_steps, args.num_envs), dtype=torch.float).to(args.rl_device)
     advantages = torch.zeros_like(rewards, dtype=torch.float).to(args.rl_device)
 
+    # Reward vs Altitude tracking for environment 0
+    altitude_history = []
+    reward_history = []
+
     global_step = 0
     episode_number = 0
     num_updates = args.total_timesteps // args.batch_size
@@ -317,31 +321,47 @@ def train_altitude_control(env, agent, args):
 
             next_obs, rewards[step], next_done, info = env.step(action)
 
+            current_altitude = next_obs[0, 0].item()  
+            altitude_history.append(current_altitude)
+            reward_history.append(rewards[step, 0].item())
+
             skip_reward = False
             if 0 <= step <= 2:
-                    for idx, d in enumerate(next_done):
-                        if d:
-                            episode_number += 1
-                            episodic_return = info["r"][idx].item()  
-                            episodic_length = info["l"][idx]  
+                for idx, d in enumerate(next_done):
+                    if d:
+                        episode_number += 1
+                        episodic_return = info["r"][idx].item()  
+                        episodic_length = info["l"][idx]  
 
-                            print(f"Episode {episode_number}, global_step={global_step}, episodic_return={episodic_return}")
-                            writer.add_scalar("charts/episodic_return", episodic_return, global_step)
-                            writer.add_scalar("charts/episodic_length", episodic_length, global_step)
-                            
-                            if "consecutive_successes" in info:
-                                writer.add_scalar("charts/consecutive_successes", info["consecutive_successes"].item(), global_step)
-                            break
-
-
+                        print(f"Episode {episode_number}, global_step={global_step}, episodic_return={episodic_return}")
+                        writer.add_scalar("charts/episodic_return", episodic_return, global_step)
+                        writer.add_scalar("charts/episodic_length", episodic_length, global_step)
+                        
+                        if "consecutive_successes" in info:
+                            writer.add_scalar("charts/consecutive_successes", info["consecutive_successes"].item(), global_step)
+                        break
 
         with torch.no_grad():
             next_value = agent.get_value(next_obs).reshape(1, -1)
             advantages = compute_advantages(rewards, dones, values, next_value, args.gamma, args.gae_lambda)
-        
+        #plot_reward_vs_altitude(altitude_history, reward_history)
         train_step(agent, optimizer_actor, optimizer_critic, obs, actions, advantages, logprobs, values, rewards, args)
-
+        
     writer.close()
+
+    plot_reward_vs_altitude(altitude_history, reward_history)
+
+def plot_reward_vs_altitude(altitudes, rewards):
+    import matplotlib.pyplot as plt
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(altitudes, rewards, label="Reward vs Altitude")
+    plt.xlabel("Altitude (Env 0)")
+    plt.ylabel("Reward (Env 0)")
+    plt.title("Reward vs Altitude for First Environment")
+    plt.legend()
+    plt.grid()
+    plt.show()
 
 
 # ============================

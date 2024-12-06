@@ -9,7 +9,7 @@ import numpy as np
 import os
 import torch
 import sys
-from gym import spaces
+
 
 from aerial_gym import AERIAL_GYM_ROOT_DIR, AERIAL_GYM_ROOT_DIR
 
@@ -42,10 +42,6 @@ class AerialRobotWithObstacles(BaseTask):
         self.sim_device_id = sim_device
         self.headless = headless
 
-        self.action_space = spaces.Box(low=-1, high=1, shape=(4,), dtype=np.float32)
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(7,), dtype=np.float32)
-
-
         self.enable_onboard_cameras = self.cfg.env.enable_onboard_cameras
 
         self.env_asset_manager = AssetManager(self.cfg, sim_device)
@@ -70,27 +66,12 @@ class AerialRobotWithObstacles(BaseTask):
         self.root_angvels = self.root_states[..., 10:13]
 
         self.env_asset_root_states = self.vec_root_tensor[:, 1:, :]
-        
-        self.last_altitude = 0.0  # Initialize with target altitude or some reasonable default value
-        self.previous_altitude = 0.0
 
-        history_length = 0
+        history_length = 5
         self.history_length = history_length
         self.attitude_history = torch.zeros((history_length, 3), device=self.device) 
-        #self.altitude_history = torch.zeros((history_length, 1), device=self.device)
-        #self.altitude_rate_history = torch.zeros((history_length, 1), device=self.device)
-        self.altitude_history = []  # Python list for storing altitude history
-        self.altitude_rate_history = []
-        self.distance_front_history = []
-        self.distance_rate_front_history = []
-        self.pitch_history = []
-        self.roll_history = []
-        self.yaw_history = [] 
+        self.distance_history = torch.zeros((history_length,), device=self.device) 
         self.current_timestep = 0
-        self.num_actions = 4
-        self.num_obs = 7
-        self.frame_stack = []
-        self.obs_buf_size = 10
         
         self.privileged_obs_buf = None
         if self.vec_root_tensor.shape[1] > 1:
@@ -101,7 +82,6 @@ class AerialRobotWithObstacles(BaseTask):
         self.contact_forces = gymtorch.wrap_tensor(self.contact_force_tensor).view(self.num_envs, bodies_per_env, 3)[:, 0]
 
         self.collisions = torch.zeros(self.num_envs, device=self.device)
-        self.too_high = torch.zeros(self.num_envs, device=self.device)
 
         self.initial_root_states = self.root_states.clone()
         self.counter = 0
@@ -126,6 +106,7 @@ class AerialRobotWithObstacles(BaseTask):
             (self.num_envs, 3), dtype=torch.float32, device=self.device)
         self.env_upper_bound = torch.zeros(
             (self.num_envs, 3), dtype=torch.float32, device=self.device)
+
 
         if self.cfg.env.enable_onboard_cameras:
             self.full_camera_array1     = torch.zeros((self.num_envs, 8, 8), device=self.device)
@@ -363,8 +344,6 @@ class AerialRobotWithObstacles(BaseTask):
 
     def step(self, actions):
         self.reset_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
-        
-        max_episode_timesteps = 5000
         for i in range(self.cfg.env.num_control_steps_per_env_step):
             self.pre_physics_step(actions)
             self.gym.simulate(self.sim)
@@ -375,35 +354,25 @@ class AerialRobotWithObstacles(BaseTask):
             self.render_cameras()
         
         self.progress_buf += 1
-        self.collisions = torch.zeros(self.num_envs, device=self.device)
-        self.too_high = torch.zeros(self.num_envs, device=self.device)
 
         self.check_collisions()
 
         self.compute_observations()
-        self.check_altitude()
+        
         altitude_reward = self.compute_reward_altitude()
-        altitude_reward = torch.tensor(altitude_reward, device=self.device)
-
-        #if altitude_reward.dim() == 1:
-        #    altitude_reward = altitude_reward.unsqueeze(1) 
         
+        if altitude_reward.dim() == 1:
+            altitude_reward = altitude_reward.unsqueeze(1) 
         
-
         self.rew_buf[:] = altitude_reward  
         if self.cfg.env.reset_on_collision:
             ones = torch.ones_like(self.reset_buf)
             self.reset_buf = torch.where(self.collisions > 0, ones, self.reset_buf)
-            self.reset_buf = torch.where(self.too_high > 0, ones, self.reset_buf)
 
-        #if self.collisions > 0:
-        #    print("COLLISION")
-
-        # Reset environments that exceed 300 timesteps
-        self.reset_buf = torch.where(self.progress_buf >= max_episode_timesteps, torch.ones_like(self.reset_buf), self.reset_buf)
+        if self.collisions > 0:
+            print("COLLISION")
 
         reset_env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
-
         if len(reset_env_ids) > 0:
             self.reset_idx(reset_env_ids)
 
@@ -433,7 +402,6 @@ class AerialRobotWithObstacles(BaseTask):
         if self.cfg.env.reset_on_collision:
             ones = torch.ones_like(self.reset_buf)
             self.reset_buf = torch.where(self.collisions > 0, ones, self.reset_buf)
-            self.reset_buf = torch.where(self.too_high > 0, ones, self.reset_buf)
 
         reset_env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
         if len(reset_env_ids) > 0:
@@ -485,64 +453,38 @@ class AerialRobotWithObstacles(BaseTask):
         self.progress_buf[env_ids] = 0
         self.reset_buf[env_ids] = 1
 
-    # def pre_physics_step(self, _actions):
-    #     # resets
-    #     if self.counter % 250 == 0:
-    #         print("self.counter:", self.counter)
-    #     self.counter += 1
-
-        
-    #     actions = _actions.to(self.device)
-    #     actions = tensor_clamp(
-    #         actions, self.action_lower_limits, self.action_upper_limits)
-    #     self.action_input[:] = actions
-
-    #     # clear actions for reset envs
-    #     self.forces[:] = 0.0
-    #     self.torques[:, :] = 0.0
-
-    #     output_thrusts_mass_normalized, output_torques_inertia_normalized = self.controller(self.root_states, self.action_input)
-    #     self.forces[:, 0, 2] = self.robot_mass * (-self.sim_params.gravity.z) * output_thrusts_mass_normalized
-    #     self.torques[:, 0] = output_torques_inertia_normalized
-    #     self.forces = torch.where(self.forces < 0, torch.zeros_like(self.forces), self.forces)
-
-    #     # apply actions
-    #     self.gym.apply_rigid_body_force_tensors(self.sim, gymtorch.unwrap_tensor(
-    #         self.forces), gymtorch.unwrap_tensor(self.torques), gymapi.LOCAL_SPACE)
-
     def pre_physics_step(self, _actions):
-         if self.counter % 250 == 0:
-             print("self.counter:", self.counter)
-         self.counter += 1
+        if self.counter % 250 == 0:
+            print("self.counter:", self.counter)
+        self.counter += 1
 
-         actions = torch.tensor(_actions, dtype=torch.float32).to(self.device)
-         actions = tensor_clamp(actions, self.action_lower_limits, self.action_upper_limits)
-         self.action_input[:] = actions
+        actions = torch.tensor(_actions, dtype=torch.float32).to(self.device)
+        actions = tensor_clamp(actions, self.action_lower_limits, self.action_upper_limits)
+        self.action_input[:] = actions
 
-         self.forces[:] = 0.0
-         self.torques[:, :] = 0.0
+        self.forces[:] = 0.0
+        self.torques[:, :] = 0.0
 
-         output_thrusts_mass_normalized, output_torques_inertia_normalized = self.controller(self.root_states, self.action_input)
+        output_thrusts_mass_normalized, output_torques_inertia_normalized = self.controller(self.root_states, self.action_input)
 
-         self.forces[:, 0, 2] = self.robot_mass * (-self.sim_params.gravity.z) * output_thrusts_mass_normalized
-         self.torques[:, 0] = output_torques_inertia_normalized
+        self.forces[:, 0, 2] = self.robot_mass * (-self.sim_params.gravity.z) * output_thrusts_mass_normalized
+        self.torques[:, 0] = output_torques_inertia_normalized
 
-         v_x_k = self.root_linvels[:, 0]  
-         v_y_k = self.root_linvels[:, 1] 
+        v_x_k = self.root_linvels[:, 0]  
+        v_y_k = self.root_linvels[:, 1] 
 
-         g = 9.81  
-         dt = self.sim_params.dt  
-         b_x = 0.42  
-         b_y = 0.18  
+        g = 9.81  
+        dt = self.sim_params.dt  
+        b_x = 4.2  
+        b_y = 1.8  
 
-         drag_force_x = -b_x * v_x_k
-         drag_force_y = -b_y * v_y_k 
+        drag_force_x = -b_x * v_x_k
+        drag_force_y = -b_y * v_y_k
 
-         self.forces[:, 0, 0] += drag_force_x  
-         self.forces[:, 0, 1] += drag_force_y 
-         
-         
-         self.gym.apply_rigid_body_force_tensors(self.sim, gymtorch.unwrap_tensor(self.forces), gymtorch.unwrap_tensor(self.torques), gymapi.LOCAL_SPACE)
+        self.forces[:, 0, 0] += drag_force_x  
+        self.forces[:, 0, 1] += drag_force_y 
+
+        self.gym.apply_rigid_body_force_tensors(self.sim, gymtorch.unwrap_tensor(self.forces), gymtorch.unwrap_tensor(self.torques), gymapi.LOCAL_SPACE)
 
 
 
@@ -565,6 +507,7 @@ class AerialRobotWithObstacles(BaseTask):
         zeros = torch.zeros((self.num_envs), device=self.device)
         self.collisions[:] = 0
         self.collisions = torch.where(torch.norm(self.contact_forces, dim=1) > 0.1, ones, zeros)
+
 
 
     def dump_images(self):
@@ -593,46 +536,17 @@ class AerialRobotWithObstacles(BaseTask):
 
         for camera_array in [self.full_camera_array1, self.full_camera_array2, self.full_camera_array3,
                             self.full_camera_array4, self.full_camera_array5]:
-            depth_np = camera_array.cpu().numpy() 
-            print(depth_np)
+            
+            depth_np = camera_array.cpu().numpy() / 10.0
+            
             depth_np = np.clip(depth_np, 0, max_depth)
+            
             depth_img = np.uint8(depth_np * 255 / max_depth)
+            
             depth_images.append(depth_img)
             depth_values.append(depth_np)
 
-        return depth_images, depth_values  
-    
-    # def pre_physics_step(self, _actions):
-    #     # resets
-    #     if self.counter % 250 == 0:
-    #         print("self.counter:", self.counter)
-    #     self.counter += 1
-
-        
-    #     actions = _actions.to(self.device)
-    #     actions = tensor_clamp(
-    #         actions, self.action_lower_limits, self.action_upper_limits)
-    #     self.action_input[:] = actions
-
-    #     # clear actions for reset envs
-    #     self.forces[:] = 0.0
-    #     self.torques[:, :] = 0.0
-
-    #     output_thrusts_mass_normalized, output_torques_inertia_normalized = self.controller(self.root_states, self.action_input)
-    #     self.forces[:, 0, 2] = self.robot_mass * (-self.sim_params.gravity.z) * output_thrusts_mass_normalized
-    #     self.torques[:, 0] = output_torques_inertia_normalized
-    #     self.forces = torch.where(self.forces < 0, torch.zeros_like(self.forces), self.forces)
-
-    #     # apply actions
-    #     self.gym.apply_rigid_body_force_tensors(self.sim, gymtorch.unwrap_tensor(
-    #         self.forces), gymtorch.unwrap_tensor(self.torques), gymapi.LOCAL_SPACE)
-
-
-    ######## USUALLY ALTITUDE IS 7 BUT FOR NOW IT IS 3 SO CHANGE IT
-    def check_altitude(self):
-        self.too_high = torch.zeros_like(self.obs_buf[:, 0], dtype=torch.int)  # Create a tensor of zeros        
-        self.too_high[self.obs_buf[:, 0] >= 1] = 1
-
+        return depth_images, depth_values
     
     def compute_observations_original(self):        
         obs_buf_size = 13 + 5 
@@ -672,7 +586,7 @@ class AerialRobotWithObstacles(BaseTask):
     
     def quaternion_to_euler(self, quaternion):
         """Convert quaternion to Euler angles (pitch, roll, yaw)."""
-        x, y, z, w = quaternion[..., 0], quaternion[..., 1], quaternion[..., 2], quaternion[..., 3]
+        w, x, y, z = quaternion[..., 0], quaternion[..., 1], quaternion[..., 2], quaternion[..., 3]
         t0 = +2.0 * (w * x + y * z)
         t1 = +1.0 - 2.0 * (x * x + y * y)
         roll = torch.atan2(t0, t1)
@@ -687,80 +601,8 @@ class AerialRobotWithObstacles(BaseTask):
 
         return roll, pitch, yaw
 
-
-
     def compute_observations(self):
-        num_features = 7  # altitude, rate of change, pitch, roll, yaw, distance front, rate front
-        stacked_features = num_features * self.history_length  # Total stacked features
-        self.obs_buf = torch.zeros((self.num_envs, num_features), device=self.device)
-
-        depth_images, depth_values = self.process_depth_images()
-
-        depth_values = [torch.tensor(depth, device=self.device) for depth in depth_values]
-
-        min_depths = [depth.min(dim=1, keepdim=True).values for depth in depth_values]
-
-        current_altitude = min_depths[4] 
-        distance_front = min_depths[0]   
-        current_altitude = current_altitude.min(dim=-1).values.squeeze()
-        distance_front = distance_front.min(dim=-1).values.squeeze()    
-
-        if hasattr(self, 'previous_altitude') and self.previous_altitude is not None:
-            delta_t = self.cfg.sim.dt
-            altitude_rate_of_change = (current_altitude - self.previous_altitude) / delta_t
-        else:
-            altitude_rate_of_change = torch.zeros_like(current_altitude)
-
-        if hasattr(self, 'previous_distance_front') and self.previous_distance_front is not None:
-            distance_rate_front = (distance_front - self.previous_distance_front) / delta_t
-        else:
-            distance_rate_front = torch.zeros_like(distance_front)
-
-        roll, pitch, yaw = self.quaternion_to_euler(self.root_quats)
-
-        #self.altitude_history.append(current_altitude.item())
-        #self.altitude_rate_history.append(altitude_rate_of_change.item())
-        #self.distance_front_history.append(distance_front.item())
-        #self.distance_rate_front_history.append(distance_rate_front.item())
-        #self.pitch_history.append(pitch)
-        #self.roll_history.append(roll)
-        #self.yaw_history.append(yaw)
-
-        #for history in [self.altitude_history, self.altitude_rate_history,
-        #                self.distance_front_history, self.distance_rate_front_history,
-        #                self.pitch_history, self.roll_history, self.yaw_history]:
-        #    if len(history) > self.history_length:
-        #        history.pop(0)
-
-        self.obs_buf[..., 0] = current_altitude
-        self.obs_buf[..., 1] = altitude_rate_of_change
-        self.obs_buf[..., 2] = distance_front
-        self.obs_buf[..., 3] = distance_rate_front
-        self.obs_buf[..., 4] = pitch
-        self.obs_buf[..., 5] = roll
-        self.obs_buf[..., 6] = yaw
-        
-        # stacked_obs = torch.zeros((self.num_envs, num_features * self.history_length), device=self.device)
-        
-        # for i in range(self.history_length):
-        #     idx = i * num_features  
-        #     stacked_obs[:, idx + 0] = self.altitude_history[-(i + 1)] if i < len(self.altitude_history) else 0.0
-        #     stacked_obs[:, idx + 1] = self.altitude_rate_history[-(i + 1)] if i < len(self.altitude_rate_history) else 0.0
-        #     stacked_obs[:, idx + 2] = self.distance_front_history[-(i + 1)] if i < len(self.distance_front_history) else 0.0
-        #     stacked_obs[:, idx + 3] = self.distance_rate_front_history[-(i + 1)] if i < len(self.distance_rate_front_history) else 0.0
-        #     stacked_obs[:, idx + 4] = self.pitch_history[-(i + 1)] if i < len(self.pitch_history) else 0.0
-        #     stacked_obs[:, idx + 5] = self.roll_history[-(i + 1)] if i < len(self.roll_history) else 0.0
-        #     stacked_obs[:, idx + 6] = self.yaw_history[-(i + 1)] if i < len(self.yaw_history) else 0.0
-
-        # self.obs_buf[:, :] = stacked_obs
-
-        self.previous_altitude = current_altitude.clone()
-        self.previous_distance_front = distance_front.clone()
-
-        return self.obs_buf
-   
-    def compute_observations_nohistory(self):
-        obs_buf_size = 8 #+ (self.history_length * 3) + (self.history_length * 5)
+        obs_buf_size = 8
         self.obs_buf = torch.zeros((self.num_envs, obs_buf_size), device=self.device)
 
         roll, pitch, yaw = self.quaternion_to_euler(self.root_quats)
@@ -768,21 +610,13 @@ class AerialRobotWithObstacles(BaseTask):
         self.obs_buf[..., 0] = pitch
         self.obs_buf[..., 1] = roll
         self.obs_buf[..., 2] = yaw
-
         depth_images, depth_values = self.process_depth_images()
+
         depth_values = [torch.tensor(depth, device=self.device) for depth in depth_values]
-        
-        min_depths = [depth.min().unsqueeze(0) for depth in depth_values]
+
+        min_depths = [depth.min().unsqueeze(0) for depth in depth_values] 
         self.obs_buf[..., 3:8] = torch.cat(min_depths, dim=0)
 
-        #current_attitudes = torch.tensor([pitch, roll, yaw], device=self.device)
-        #current_distances = torch.cat(min_depths) 
-
-      #  self.update_history(current_attitudes, current_distances)
-
-        #history_attitudes = self.attitude_history.flatten()
-        #history_distances = self.distance_history.flatten()
-      
         detection_threshold = 0.3
         self.extras["front_detected"] = (min_depths[0] < detection_threshold).float()
         self.extras["left_detected"] = (min_depths[1] < detection_threshold).float()
@@ -792,10 +626,7 @@ class AerialRobotWithObstacles(BaseTask):
 
         return self.obs_buf
 
-    def update_history(self, current_attitudes, current_distances):
-        self.attitude_history[self.current_timestep % self.history_length] = current_attitudes
-        self.distance_history[self.current_timestep % self.history_length] = current_distances
-        self.current_timestep += 1
+
 
     def compute_reward(self):
         self.rew_buf[:], self.reset_buf[:] = compute_quadcopter_reward(
@@ -805,89 +636,49 @@ class AerialRobotWithObstacles(BaseTask):
             self.root_angvels,
             self.reset_buf, self.progress_buf, self.max_episode_length
         )
- 
-
-    def compute_reward_altitude_old(self):
-        target_altitude = 0.3
-        tolerance = 0.01
-        a = 10  # Scaling factor for altitude rewards
-        b = 5   # Scaling factor for movement rewards
-        c = 100  # Collision penalty
-        d = 100  # Too-high penalty
-        
-        current_distance = self.obs_buf[..., 0]
-        reward = 0
-
-        # Positive reward for moving closer to target altitude
-        distance_to_target = torch.abs(target_altitude - current_distance)
-        reward -= a * distance_to_target  # Penalize distance
-
-        # Extra reward for being within the tolerance range
-        if torch.abs(current_distance - target_altitude) <= tolerance:
-            reward += b
-
-        # Strong penalties for dangerous states
-        if self.collisions == 1:
-            reward -= c  # Penalty for collision
-        elif self.too_high == 1:
-            reward -= d  # Penalty for flying too high
-
-        print("REWARD: ", reward)
-        return reward
-
-
-    def compute_reward_altitude_cases(self):
-        target_altitude = 0.3
-        tolerance = 0.2
-        median_low = target_altitude - tolerance / 2
-        median_high = target_altitude + tolerance / 2
-        a = 10
-        reward = 0
-        current_distance = self.obs_buf[..., 0]
-
-        # Case 1: current altitude <= target - tolerance:
-        if torch.where(current_distance <= target_altitude - tolerance):
-            reward = -a**2 * torch.abs((target_altitude - tolerance) -  current_distance)
-        # Case 2: current altitude > target - tolerance & current altitude < target & current altitude <= median_low:
-        if current_distance > target_altitude - tolerance and current_distance < target_altitude and current_distance <= median_low:
-            reward = -a * torch.abs((target_altitude - tolerance / 2) - current_distance)
-        # Case 3: current altitude > target - tolerance & current altitude <= target & current altitude > median_low:
-        if current_distance > target_altitude - tolerance and current_distance <= target_altitude and current_distance > median_low:
-            reward = -a * torch.abs(target_altitude - current_distance)
-        # Case 4: current altitude > target & current altitude < target + tolerance & current altitude <= median_high:
-        if current_distance > target_altitude and current_distance < target_altitude + tolerance and current_distance <= median_high:
-            reward = -a * torch.abs(target_altitude - current_distance)
-        # Case 5: current altitude > target & current altitude <= target + tolerance & current altitude > median_high:
-        if current_distance > target_altitude and current_distance <= target_altitude + tolerance and current_distance > median_high:
-            reward = -a * torch.abs((target_altitude + tolerance / 2) - current_distance)
-        # Case 6: current altitude > target + tolerance
-        if current_distance > target_altitude + tolerance:
-            reward = -a**2 * torch.abs((target_altitude + tolerance) - current_distance)
-
-        if self.collisions == 1:
-             reward += -100
-        if self.too_high == 1:
-             reward += -100
-
-      #  print("REWARD: ", reward)
-
-        return reward
 
     def compute_reward_altitude(self):
+        depth_images, depth_values = self.process_depth_images()
+
+        depth_values = [torch.tensor(depth, device=self.device) for depth in depth_values]
+        current_altitude = torch.tensor(depth_values[4].mean().item(), device=self.device)  
         target_altitude = 0.3
-        tolerance = 0.05
-        current_distance = self.obs_buf[..., 0]
+        tolerance = 0.1  
 
-        reward = -0.003 * torch.abs(target_altitude - current_distance)
+        altitude_error = abs(current_altitude - target_altitude)
+        if altitude_error <= tolerance:
+            reward = 100.0
+        else:
+            reward = -altitude_error*10
 
-        collision_mask = self.collisions > 0
-        toohigh_mark   = self.too_high > 0 
-        reward[collision_mask] += -0.5 
-        reward[toohigh_mark] += -0.5
-
-       # print("Reward: ", reward)
+        altitude_change_penalty = abs(current_altitude - getattr(self, 'last_altitude', target_altitude)) * 0.1
+        reward -= altitude_change_penalty*10
+        self.last_altitude = current_altitude
 
         return reward
+
+
+    def compute_reward_rl(self):
+        depth_images, depth_values = self.process_depth_images()
+        
+        depth_values = [torch.tensor(depth, device=self.device) for depth in depth_values]
+        
+        current_altitude = torch.tensor(depth_values[4].mean().item(), device=self.device)  
+        current_distance_to_obstacle = torch.tensor(depth_values[0].mean().item(), device=self.device) 
+        left_distance_to_obstacle = torch.tensor(depth_values[1].mean().item(), device=self.device)  
+        right_distance_to_obstacle = torch.tensor(depth_values[2].mean().item(), device=self.device) 
+        
+        yaw = torch.tensor(self.estimate_yaw_from_tof(left_distance_to_obstacle.item(), right_distance_to_obstacle.item()), device=self.device)
+        
+        self.rew_buf[:], self.reset_buf[:] = compute_rewards(
+            current_altitude, 
+            current_distance_to_obstacle, 
+            yaw, 
+            left_distance_to_obstacle, 
+            right_distance_to_obstacle
+        )
+
+
 
 ###=========================jit functions=========================###
 #####################################################################
