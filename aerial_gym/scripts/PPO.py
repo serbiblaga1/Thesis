@@ -183,7 +183,7 @@ class Agent(nn.Module):
 
         if not isinstance(action, torch.Tensor):
             action = torch.tensor(action, dtype=torch.float32, device=x.device) 
-
+        
         full_action = torch.zeros((action.shape[0], 4), device=x.device)  
         full_action[:, 0] = action.squeeze(-1) * 0.1
 

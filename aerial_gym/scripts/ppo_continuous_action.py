@@ -193,6 +193,7 @@ class Agent(nn.Module):
 
         full_action = torch.zeros((action.shape[0], 4), device=x.device)  
         full_action[:, 0] = action[:, 0] * 0.01
+        
         return full_action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
     
 

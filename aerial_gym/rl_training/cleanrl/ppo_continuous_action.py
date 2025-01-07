@@ -54,7 +54,7 @@ def get_args():
         {"name": "--headless", "action": "store_true", "default": False, "help": "Force display off at all times"},
         {"name": "--horovod", "action": "store_true", "default": False, "help": "Use horovod for multi-gpu training"},
         {"name": "--rl_device", "type": str, "default": "cuda:0", "help": 'Device used by the RL algorithm, (cpu, gpu, cuda:0, cuda:1 etc..)'},
-        {"name": "--num_envs", "type": int, "default": 1, "help": "Number of environments to create. Overrides config file if provided."},
+        {"name": "--num_envs", "type": int, "default": 100, "help": "Number of environments to create. Overrides config file if provided."},
         {"name": "--seed", "type": int, "default": 1, "help": "Random seed. Overrides config file if provided."},
         {"name": "--play", "required": False, "help": "only run network", "action": 'store_true'},
 
@@ -115,6 +115,66 @@ def get_args():
         args.sim_device += f":{args.sim_device_id}"
     return args
 
+def evaluate_model(agent, envs, num_episodes=10, checkpoint_path="latest_model.pth", device="cuda"):
+    """
+    Evaluate the agent using a saved model.
+
+    Parameters:
+        agent (nn.Module): The agent neural network.
+        envs (gym.Env): The evaluation environment.
+        num_episodes (int): Number of episodes to evaluate.
+        checkpoint_path (str): Path to the saved model checkpoint.
+        device (str): Device to use ("cuda" or "cpu").
+
+    Returns:
+        dict: A dictionary with evaluation metrics.
+    """
+    # Load the latest model
+    print(f"Loading model from {checkpoint_path}...")
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    agent.load_state_dict(checkpoint)
+    agent.eval()
+
+    # Evaluation metrics
+    total_rewards = []
+    total_lengths = []
+
+    for episode in range(num_episodes):
+        obs, _ = envs.reset()
+        episode_reward = 0
+        episode_length = 0
+        done = False
+
+        while not done:
+            with torch.no_grad():
+                # Get action from the agent
+                action, _, _, _ = agent.get_action_and_value(obs)
+                action = action.cpu().numpy()
+
+            # Step through the environment
+            obs, reward, done, info = envs.step(action)
+            episode_reward += reward
+            episode_length += 1
+
+            # Handle multiple environments
+            if isinstance(done, np.ndarray):  # Check for vectorized environments
+                done = done.any()
+
+        total_rewards.append(episode_reward)
+        total_lengths.append(episode_length)
+        print(f"Episode {episode + 1}/{num_episodes} -> Reward: {episode_reward}, Length: {episode_length}")
+
+    # Compute average metrics
+    avg_reward = np.mean(total_rewards)
+    avg_length = np.mean(total_lengths)
+
+    print(f"\nEvaluation Summary: Avg Reward = {avg_reward}, Avg Length = {avg_length}")
+    return {
+        "average_reward": avg_reward,
+        "average_length": avg_length,
+        "rewards": total_rewards,
+        "lengths": total_lengths,
+    }
 
 
 class RecordEpisodeStatisticsTorch(gym.Wrapper):
@@ -180,19 +240,26 @@ class Agent(nn.Module):
     def get_value(self, x):
         return self.critic(x)
 
+
     def get_action_and_value(self, x, action=None):
         action_mean = self.actor_mean(x)
+        action_mean[:, 1:] = 0.0  
+
         action_logstd = self.actor_logstd.expand_as(action_mean)
         action_std = torch.exp(action_logstd)
         probs = Normal(action_mean, action_std)
+
         if action is None:
             action = probs.sample()
+
+        action[:, 1:] = 0.0
+
         return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
 
 
 if __name__ == "__main__":
     args = get_args()
-
+    
 
     run_name = f"{args.task}__{args.experiment_name}__{args.seed}__{int(time.time())}"
     if args.track:
@@ -259,7 +326,7 @@ if __name__ == "__main__":
     next_obs,_info = envs.reset()
     next_done = torch.zeros(args.num_envs, dtype=torch.float).to(device)
     num_updates = args.total_timesteps // args.batch_size
-
+    num_updates = 6000
     if not args.play:
         for update in range(1, num_updates + 1):
             # Annealing the rate if instructed to do so.
@@ -282,18 +349,25 @@ if __name__ == "__main__":
 
                 # TRY NOT TO MODIFY: execute the game and log data.
                 next_obs, rewards[step], next_done, info = envs.step(action)
-                if 0 <= step <= 2:
-                    for idx, d in enumerate(next_done):
-                        if d:
-                            episodic_return = info["r"][idx].item()
-                            print(f"global_step={global_step}, episodic_return={episodic_return}")
+        
+                for idx, d in enumerate(next_done):
+                    if d:
+                        episodic_return = info["r"][idx].item()
+                        episodic_length = info["l"][idx].item()
+                        
+                        # Skip logging for episodes with a length of 1
+                        if episodic_length > 1:
+                            print(f"global_step={global_step}, episodic_return={episodic_return}, episodic_length={episodic_length}")
                             writer.add_scalar("charts/episodic_return", episodic_return, global_step)
-                            writer.add_scalar("charts/episodic_length", info["l"][idx], global_step)
+                            writer.add_scalar("charts/episodic_length", episodic_length, global_step)
+                            
                             if "consecutive_successes" in info:  # ShadowHand and AllegroHand metric
                                 writer.add_scalar(
                                     "charts/consecutive_successes", info["consecutive_successes"].item(), global_step
                                 )
-                            break
+
+                        break
+
 
             # bootstrap value if not done
             with torch.no_grad():
@@ -366,7 +440,9 @@ if __name__ == "__main__":
 
                     optimizer.zero_grad()
                     loss.backward()
+
                     nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
+
                     optimizer.step()
 
                 if args.target_kl is not None:

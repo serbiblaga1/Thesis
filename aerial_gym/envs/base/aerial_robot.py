@@ -7,7 +7,7 @@
 import math
 import numpy as np
 import os
-import torch
+
 import xml.etree.ElementTree as ET
 
 
@@ -22,7 +22,7 @@ from aerial_gym.envs.controllers.controller import Controller
 import matplotlib.pyplot as plt
 from aerial_gym.utils.helpers import asset_class_to_AssetOptions
 import time
-
+import torch
 class AerialRobot(BaseTask):
 
     def __init__(self, cfg: AerialRobotCfg, sim_params, physics_engine, sim_device, headless):
