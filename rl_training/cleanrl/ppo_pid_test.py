@@ -66,53 +66,93 @@ def process_depth_images(env):
     
     return depth_images, depth_values
 
-def display_depth_images(depth_images):
-    titles = ['Front', 'Left', 'Right', 'Back', 'Down']
-    
-    for img, title in zip(depth_images, titles):
-        grayscale_img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)  
-        
-        close_mask = img < int(0.5 * 255)  
-        grayscale_img[close_mask] = [0, 0, 255]  
-        
-        cv2.imshow(title, grayscale_img)
-
-    cv2.waitKey(1)
-    
-def plot_downward_sensor(corrected_altitude, obstacle_distances, target_altitude=0.375, obstacle_threshold=0.250):
+def log_and_plot_actions(actions):
     """
-    Plots the downward sensor readings (altitude) with color coding:
+    Plots the pitch (actions[:, 0, 2]) and yaw (actions[:, 0, 3]) 
+    over 100,000 steps for the first drone.
+
+    Args:
+        actions (Tensor): A tensor of shape (num_steps, num_envs, 4) storing logged actions.
+    """
+    num_steps = actions.shape[0]  # Ensure we get the actual logged steps
+
+    # Extract pitch and yaw actions for the first drone
+    pitch_actions = actions[:, 0, 2].cpu().numpy()  # Shape: (num_steps,)
+    yaw_actions = actions[:, 0, 3].cpu().numpy()  # Shape: (num_steps,)
+
+    timesteps = range(num_steps)  # Ensure timesteps match actions length
+
+    # Plot pitch actions
+    plt.figure(figsize=(10, 5))
+    plt.subplot(2, 1, 1)
+    plt.plot(timesteps, pitch_actions, color="blue", linestyle="solid", label="Pitch Action")
+    plt.title("Pitch Action Over Time (First Drone)")
+    plt.xlabel("Time Steps")
+    plt.ylabel("Pitch Action Value")
+    plt.legend()
+
+    # Plot yaw actions
+    plt.subplot(2, 1, 2)
+    plt.plot(timesteps, yaw_actions, color="red", linestyle="solid", label="Yaw Action")
+    plt.title("Yaw Action Over Time (First Drone)")
+    plt.xlabel("Time Steps")
+    plt.ylabel("Yaw Action Value")
+    plt.legend()
+
+    plt.tight_layout()
+    plt.show()
+
+def plot_downward_sensor_live(corrected_altitude, obstacle_front, obstacle_left, obstacle_right, obstacle_back, target_altitude=0.375, obstacle_threshold=0.25):
+    """
+    Live-updating plot of downward sensor readings (altitude) with color coding for the first drone [0].
     
     - Green: No obstacle detected.
-    - Red: Obstacle detected (distance ≤ obstacle_threshold).
+    - Red: Obstacle detected in any direction (front, left, right, back) (distance ≤ obstacle_threshold).
     - Dotted black line: Target altitude.
 
     Args:
-        corrected_altitude (list or np.array): The altitude readings over time.
-        obstacle_distances (list or np.array): The detected obstacle distances at each timestep.
+        corrected_altitude (np.array): The altitude readings over time (shape: [steps, num_drones]).
+        obstacle_front (np.array): Front sensor readings over time (shape: [steps, num_drones]).
+        obstacle_left (np.array): Left sensor readings over time (shape: [steps, num_drones]).
+        obstacle_right (np.array): Right sensor readings over time (shape: [steps, num_drones]).
+        obstacle_back (np.array): Back sensor readings over time (shape: [steps, num_drones]).
         target_altitude (float): The target altitude (default: 0.375m).
         obstacle_threshold (float): Distance threshold for detecting an obstacle (default: 1.0m).
     """
     num_steps = len(corrected_altitude)
-    obstacle_detected = np.array(obstacle_distances) <= obstacle_threshold  # Boolean array for obstacle detection
 
-    plt.figure(figsize=(10, 5))
+    # Extract only the first drone's data (drone[0])
+    altitude_drone0 = np.array(corrected_altitude)  
+    obstacle_front0 = np.array(obstacle_front)  
+    obstacle_left0 = np.array(obstacle_left)  
+    obstacle_right0 = np.array(obstacle_right)  
+    obstacle_back0 = np.array(obstacle_back)  
 
-    # Plot each segment with corresponding color
+    # Detect if an obstacle is too close in ANY direction
+    obstacle_detected = (
+        (obstacle_front0 <= obstacle_threshold) | 
+        (obstacle_left0 <= obstacle_threshold) |
+        (obstacle_right0 <= obstacle_threshold) |
+        (obstacle_back0 <= obstacle_threshold)
+    )
+
+    plt.clf()  # Clear previous plot
+    plt.figure(1)  # Keep the same figure for live updating
+
+    # Plot altitude with color-coded obstacle detection
     for i in range(1, num_steps):
-        color = "red" if obstacle_detected[i] else "green"
-        plt.plot([i - 1, i], [corrected_altitude[i - 1], corrected_altitude[i]], color=color, linewidth=2)
+        color = "red" if obstacle_detected[i] else "green"  # Turn red if any obstacle is detected
+        plt.plot([i - 1, i], [altitude_drone0[i - 1], altitude_drone0[i]], color=color, linewidth=2)
 
     # Add target altitude as a dotted line
     plt.axhline(y=target_altitude, color="black", linestyle="dotted", linewidth=2, label="Target Altitude")
 
     # Labels and legend
-    plt.title("Downward Sensor Readings with Obstacle Detection")
+    plt.title("Downward Sensor Readings for Drone [0] (Live)")
     plt.xlabel("Time Steps")
     plt.ylabel("Altitude (m)")
     plt.legend(["Target Altitude", "Altitude Before Obstacle", "Altitude After Obstacle"], loc="upper right")
 
-    # Show the plot
     plt.show()
 
 class PIDController:
@@ -282,12 +322,14 @@ class Agent(nn.Module):
 
     def get_action_and_value(self, x, action=None):
         action_mean = self.actor_mean(x)
+        action_mean = torch.tanh(action_mean) * 0.01
         action_logstd = self.actor_logstd.expand_as(action_mean)
         action_std = torch.exp(action_logstd)
         probs = Normal(action_mean, action_std)
 
         if action is None:
             action = probs.sample()
+        action = torch.clamp(action, -0.5, 0.5)
         return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
 
 
@@ -368,6 +410,8 @@ if __name__ == "__main__":
     yaw_log = []
     distance_front_log = []
     distance_back_log = []
+    distance_left_log = []
+    distance_right_log = []
     collision_log = []
     too_high_log = []
 
@@ -377,7 +421,12 @@ if __name__ == "__main__":
     next_obs,_info = envs.reset()
     initial_tof = 0.375 
     estimated_altitude = torch.tensor(0, device=device) 
- 
+    corrected_altitude_log = []
+    distance_front_log = []
+    # Storage for action logging
+    logged_actions = []
+
+    plot_update_interval = 100000
     print("Target Altitude (initial_tof):", initial_tof)
 
     pid = PIDController(Kp=1.0, Ki=0.1, Kd=0.05, target_altitude=initial_tof)
@@ -402,18 +451,56 @@ if __name__ == "__main__":
                 #display_depth_images(depth_images)
                 min_depths = [torch.amin(torch.tensor(depth, device=device), dim=1) for depth in depth_values]
                 raw_altitude = min_depths[4].min(dim=-1).values.squeeze()
-        
- 
+                distance_front = min_depths[0].min(dim=-1).values.squeeze()  # Front ToF distance
+                distance_back = min_depths[1].min(dim=-1).values.squeeze()
+                distance_left = min_depths[2].min(dim=-1).values.squeeze()
+                distance_right = min_depths[3].min(dim=-1).values.squeeze()
+            
+
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                      break  
                 
-                
                 corrected_altitude = torch.clamp(raw_altitude * torch.cos(next_obs[..., 1] * np.pi), max=4.0)
+                alpha_min = 0.05  
+                alpha_max = 0.3  
+                error_threshold = 0.005  
 
-                # Compute altitude error for PID control
-                altitude_error = initial_tof - corrected_altitude
-                # Check altitude stability over time
+                if not hasattr(envs, "smoothed_altitude"):
+                    envs.smoothed_altitude = corrected_altitude.clone()  
+
+                obstacle_nearby = (
+                    (distance_front <= 0.25) | 
+                    (distance_left <= 0.25) | 
+                    (distance_right <= 0.25) | 
+                    (distance_back <= 0.25)
+                ) 
+
+                altitude_error = torch.abs(corrected_altitude - envs.smoothed_altitude)
+
+                adaptive_alpha = torch.where(
+                    altitude_error > error_threshold,  
+                    alpha_max, 
+                    alpha_min  
+                )
+
+                corrected_altitude = torch.where(
+                    obstacle_nearby,  
+                    adaptive_alpha * envs.smoothed_altitude + (1 - adaptive_alpha) * corrected_altitude,  
+                    corrected_altitude  
+                )
+
+                envs.smoothed_altitude = corrected_altitude.clone()
+
+                corrected_altitude_log.append(envs.smoothed_altitude[0].cpu().numpy())
+                distance_front_log.append(distance_front[0].cpu().numpy())
+                distance_back_log.append(distance_back[0].cpu().numpy())
+                distance_left_log.append(distance_left[0].cpu().numpy())
+                distance_right_log.append(distance_right[0].cpu().numpy())
+
+                altitude_error = initial_tof - envs.smoothed_altitude
+
                 if (torch.abs(altitude_error) < 0.01).all():
+
                     stable_altitude_counter += 1
                 else:
                     stable_altitude_counter = 0
@@ -437,13 +524,20 @@ if __name__ == "__main__":
                     refined_action[..., 0] = pid.compute(altitude_error, dt=0.01)  # PID altitude correction
                     refined_action[..., 2:] = rl_action  # Use RL for yaw/pitch actions
                     values[step] = value.flatten()
-                    print(refined_action[0])
 
+                #logged_actions.append(refined_action.clone().cpu())  # Move to CPU for logging
                 actions[step] = refined_action
                 logprobs[step] = logprob
+                #if global_step % plot_update_interval == 0:  # Check if we have logged enough steps
+                #    logged_actions = torch.stack(logged_actions)  # Convert list to tensor
+                #    log_and_plot_actions(logged_actions)  # Call function to plot
+
 
                 # TRY NOT TO MODIFY: execute the game and log data.
                 next_obs, rewards[step], next_done, info = envs.step(actions[step])
+                         # Update the live plot every `plot_update_interval` steps
+                #if global_step % plot_update_interval == 0 and len(corrected_altitude_log) > 1:
+                    #plot_downward_sensor_live(corrected_altitude_log, distance_front_log, distance_left_log, distance_right_log, distance_back_log)
  
                 if 0 <= step <= 2:
                     for idx, d in enumerate(next_done):
@@ -573,3 +667,4 @@ if __name__ == "__main__":
 
     # envs.close()
     writer.close()
+

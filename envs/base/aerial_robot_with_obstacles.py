@@ -45,7 +45,7 @@ class AerialRobotWithObstacles(BaseTask):
         self.headless = headless
 
         self.action_space = spaces.Box(low=-1, high=1, shape=(4,), dtype=np.float32)
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(13,), dtype=np.float32)
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(78,), dtype=np.float32)
 
         self.enable_onboard_cameras = self.cfg.env.enable_onboard_cameras
 
@@ -96,7 +96,7 @@ class AerialRobotWithObstacles(BaseTask):
         self.current_timestep = 0
         self.num_actions = 4
         self.num_actions_rl = 2
-        self.num_obs = 13
+        self.num_obs = 78
         self.frame_stack = []
         self.obs_buf_size = 10
         self.prev_altitude = 0
@@ -407,7 +407,6 @@ class AerialRobotWithObstacles(BaseTask):
     def step(self, actions):
         self.reset_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
         self.old_obs = self.obs_buf.clone()
-
         max_episode_timesteps = 500
         for i in range(self.cfg.env.num_control_steps_per_env_step):
             self.pre_physics_step(actions)
@@ -424,9 +423,9 @@ class AerialRobotWithObstacles(BaseTask):
         self.too_high = torch.zeros(self.num_envs, device=self.device)
 
         self.check_collisions()
-        self.compute_observations()
-        self.check_altitude()
-        altitude_reward = self.compute_reward_no_attitude()
+        self.compute_observations(actions)
+        #self.check_altitude()
+        altitude_reward = self.compute_reward_pitch()
         altitude_reward = torch.tensor(altitude_reward, device=self.device)
         
         self.rew_buf[:] = altitude_reward  
@@ -630,9 +629,37 @@ class AerialRobotWithObstacles(BaseTask):
     
 
     def check_altitude(self):
-        self.too_high = torch.zeros_like(self.obs_raw[:, 13], dtype=torch.int)       
-        self.too_high[self.obs_raw[:, 13] >= 4] = 1
+        self.too_high = torch.zeros_like(self.obs_raw[:, 7], dtype=torch.int)       
+        self.too_high[self.obs_raw[:, 7] >= 4] = 1
         
+    def downsample_tof(self, matrix, grid_size=3):
+        """
+        Downsamples an 8x8 ToF matrix into a smaller grid (3x3 or 4x4).
+        
+        Args:
+            matrix (torch.Tensor): (num_envs, 8, 8) ToF depth matrix.
+            grid_size (int): Target downsampled grid size (3 or 4).
+        
+        Returns:
+            tuple: (min_matrix, mean_matrix) - Both are (num_envs, grid_size, grid_size).
+        """
+        block_size = 8 // grid_size
+        num_envs = matrix.shape[0]  # Extract batch size
+        
+        # Ensure min_matrix and mean_matrix have the correct batch dimension
+        min_matrix = torch.zeros((num_envs, grid_size, grid_size), device=self.device)
+        mean_matrix = torch.zeros((num_envs, grid_size, grid_size), device=self.device)
+
+        for i in range(grid_size):
+            for j in range(grid_size):
+                # Extract the corresponding 3x3 or 4x4 region for all environments
+                region = matrix[:, i * block_size:(i + 1) * block_size, j * block_size:(j + 1) * block_size]
+                
+                # Compute min and mean across the last two spatial dimensions
+                min_matrix[:, i, j] = torch.amin(region, dim=(-1, -2))
+                mean_matrix[:, i, j] = torch.mean(region, dim=(-1, -2))
+
+        return min_matrix, mean_matrix
 
     
     def compute_observations_original(self):        
@@ -688,13 +715,8 @@ class AerialRobotWithObstacles(BaseTask):
 
         return roll, pitch, yaw
 
-    
-    def downsample_depth_matrix(self, depth_matrix, target_size=(4, 4)):
-        pooled_depth_matrix = F.avg_pool2d(depth_matrix, kernel_size=2, stride=2)  
-        downsampled_depth_matrix = pooled_depth_matrix.flatten(start_dim=1)[:, :7]  
-        return downsampled_depth_matrix
 
-    def compute_observations(self):
+    def compute_observations_OLD(self):
         num_features = 13
         self.obs_buf = torch.zeros((self.num_envs, num_features), device=self.device)
         #self.old_obs = torch.zeros((self.num_envs, num_features), device=self.device)
@@ -765,12 +787,89 @@ class AerialRobotWithObstacles(BaseTask):
         
         return self.obs_buf
 
-    
 
-    def update_history(self, current_attitudes, current_distances):
-        self.attitude_history[self.current_timestep % self.history_length] = current_attitudes
-        self.distance_history[self.current_timestep % self.history_length] = current_distances
-        self.current_timestep += 1
+    def compute_observations(self, actions):
+        num_features = 78  # Updated to include back, left, right cameras
+        num_raw_features = 78  
+        self.obs_buf = torch.zeros((self.num_envs, num_features), device=self.device)
+        self.obs_raw = torch.zeros((self.num_envs, num_raw_features), device=self.device)  
+
+        depth_images, depth_values = self.process_depth_images()
+        depth_values = [torch.tensor(depth, device=self.device) for depth in depth_values]
+
+        min_depths = [torch.amin(torch.tensor(depth, device=self.device), dim=1) for depth in depth_values]
+        
+        # Process front, back, left, and right cameras (8x8)
+        tof_front = depth_values[0].view(self.num_envs, 8, 8)
+        tof_back = depth_values[1].view(self.num_envs, 8, 8)
+        tof_left = depth_values[2].view(self.num_envs, 8, 8)
+        tof_right = depth_values[3].view(self.num_envs, 8, 8)
+        
+        # Downsample each camera view
+        min_front, mean_front = self.downsample_tof(tof_front, grid_size=3)
+        min_back, mean_back = self.downsample_tof(tof_back, grid_size=3)
+        min_left, mean_left = self.downsample_tof(tof_left, grid_size=3)
+        min_right, mean_right = self.downsample_tof(tof_right, grid_size=3)
+        
+        depth_change_front = min_front - self.previous_min_front if hasattr(self, 'previous_min_front') else torch.zeros_like(min_front)
+        depth_change_back = min_back - self.previous_min_back if hasattr(self, 'previous_min_back') else torch.zeros_like(min_back)
+        depth_change_left = min_left - self.previous_min_left if hasattr(self, 'previous_min_left') else torch.zeros_like(min_left)
+        depth_change_right = min_right - self.previous_min_right if hasattr(self, 'previous_min_right') else torch.zeros_like(min_right)
+        
+        roll, pitch, yaw = self.quaternion_to_euler(self.root_quats)
+        pitch_change = pitch - self.previous_pitch if hasattr(self, 'previous_pitch') else torch.tensor(0.0, device=self.device)
+        yaw_rate = (yaw - self.previous_yaw) if hasattr(self, 'previous_yaw') else torch.tensor(0.0, device=self.device)
+
+        collision = self.collisions
+
+        prev_pitch_action = self.previous_pitch_action if hasattr(self, 'previous_pitch_action') else torch.tensor(0.0, device=self.device)
+        prev_yaw_action = self.previous_yaw_action if hasattr(self, 'previous_yaw_action') else torch.tensor(0.0, device=self.device)
+        prev_thrust_action = self.previous_thrust_action if hasattr(self, 'previous_thrust_action') else torch.tensor(0.0, device=self.device)
+
+        self.obs_raw[..., 0] = prev_pitch_action
+        self.obs_raw[..., 1] = pitch
+        self.obs_raw[..., 2] = prev_yaw_action
+        self.obs_raw[..., 3] = yaw_rate
+        self.obs_raw[..., 4] = collision
+        
+        # Store all downsampled ToF matrices
+        self.obs_raw[..., 5:14] = min_front.view(self.num_envs, -1)
+        self.obs_raw[..., 14:23] = depth_change_front.view(self.num_envs, -1)
+        self.obs_raw[..., 23:32] = min_back.view(self.num_envs, -1)
+        self.obs_raw[..., 32:41] = depth_change_back.view(self.num_envs, -1)
+        self.obs_raw[..., 41:50] = min_left.view(self.num_envs, -1)
+        self.obs_raw[..., 50:59] = depth_change_left.view(self.num_envs, -1)
+        self.obs_raw[..., 59:68] = min_right.view(self.num_envs, -1)
+        self.obs_raw[..., 68:77] = depth_change_right.view(self.num_envs, -1)
+
+        self.obs_buf[..., 0] = prev_pitch_action / 4
+        self.obs_buf[..., 1] = pitch / np.pi  
+        self.obs_buf[..., 2] = prev_yaw_action / 4
+        self.obs_buf[..., 3] = yaw_rate / (2 * np.pi) 
+        self.obs_buf[..., 4] = collision  
+        self.obs_buf[..., 5:14]  = min_front.view(self.num_envs, -1) / 4.0  
+        self.obs_buf[..., 14:23] = depth_change_front.view(self.num_envs, -1) / 4.0  
+        self.obs_buf[..., 23:32] = min_back.view(self.num_envs, -1) / 4.0  
+        self.obs_buf[..., 32:41] = depth_change_back.view(self.num_envs, -1) / 4.0  
+        self.obs_buf[..., 41:50] = min_left.view(self.num_envs, -1) / 4.0  
+        self.obs_buf[..., 50:59] = depth_change_left.view(self.num_envs, -1) / 4.0  
+        self.obs_buf[..., 59:68] = min_right.view(self.num_envs, -1) / 4.0  
+        self.obs_buf[..., 68:77] = depth_change_right.view(self.num_envs, -1) / 4.0  
+
+        self.previous_pitch_action = actions[:, 2] if actions is not None else torch.zeros(self.num_envs, device=self.device)
+        self.previous_yaw_action = actions[:, 3] if actions is not None else torch.zeros(self.num_envs, device=self.device)
+        self.previous_thrust_action = actions[:, 0] if actions is not None else torch.zeros(self.num_envs, device=self.device)
+
+        self.previous_pitch = pitch.clone()
+        self.previous_yaw = yaw.clone()
+        self.previous_min_front = min_front.clone()
+        self.previous_min_back = min_back.clone()
+        self.previous_min_left = min_left.clone()
+        self.previous_min_right = min_right.clone()
+
+        return self.obs_buf
+
+
 
     def compute_reward(self):
         self.rew_buf[:], self.reset_buf[:] = compute_quadcopter_reward(
@@ -781,7 +880,36 @@ class AerialRobotWithObstacles(BaseTask):
             self.reset_buf, self.progress_buf, self.max_episode_length
         )
  
-        
+
+    def compute_reward_pitch(self):
+        pitch = self.obs_buf[..., 1]
+        collision = self.obs_buf[..., 4]
+        min_front_distance = self.obs_buf[..., 5:14].min(dim=-1).values
+
+        reward_pitch = torch.where(
+                pitch <= 0.1,
+                torch.exp(-20*torch.abs(pitch-0.1)),
+                torch.exp(-3*torch.abs(pitch-0.1))
+            )
+
+        reward_pitch = torch.where(pitch < 0.0, torch.tensor(0.0, dtype=torch.float32, device=self.device), reward_pitch)
+
+        penalty_negative_pitch = torch.where(
+            pitch < 0.0,
+            torch.abs(pitch),
+            torch.tensor(0.0, dtype=torch.float32, device=self.device)
+        )
+
+        penalty_collision = -1 * collision
+
+        print(f"{'Pitch':<10} {'Reward Pitch':<15} {'Negative Pitch Penalty':<25}")
+        print(f"{pitch[0].item():<10.3f} {reward_pitch[0].item():<15.3f} {penalty_negative_pitch[0].item():<25.3f}")
+    
+
+        return 0.1 * reward_pitch + penalty_collision + penalty_negative_pitch
+
+
+
     def compute_reward_altitude(self):
         target_altitude = 1.5
         altitude_tolerance = 0.02  
@@ -875,36 +1003,6 @@ class AerialRobotWithObstacles(BaseTask):
         return total_reward
 
 
-    def potential_function(self, state):
-        altitude = state[..., 0]
-        altitude_rate = state[..., 1]
-        roll = state[..., 2]
-        pitch = state[..., 3]
-        yaw = state[..., 4]
-
-        desired_altitude = state[..., 5]
-        desired_roll = state[..., 6]
-        desired_pitch = state[..., 7]
-        desired_yaw = state[..., 8]
-
-        distance_front = state[..., 9]
-        distance_back = state[..., 10]
-
-        collision = state[..., 11]
-        too_high = state[..., 12]
-
-        # CALCULATE POTENTIALS
-        altitude_deviation = torch.abs(altitude - desired_altitude)
-        altitude_potential = 1 - altitude_deviation
-        roll_potential = 1 - torch.abs(roll)
-        pitch_potential = 1 - torch.abs(pitch)
-        
-        collision_penalty = torch.where(collision == 1, torch.tensor(-10.0, device=self.device), torch.tensor(0.0, device=self.device))
-        too_high_penalty = torch.where(too_high == 1, torch.tensor(-5.0, device=self.device), torch.tensor(0.0, device=self.device))
-
-        potential = altitude_potential + roll_potential + pitch_potential + collision_penalty + too_high_penalty
-        print(potential[0])
-        return potential
     
     def compute_reward_no_attitude(self):
         target_altitude = self.obs_buf[..., 5]
@@ -966,6 +1064,7 @@ class AerialRobotWithObstacles(BaseTask):
         print("\n")
 
         return total_reward
+
 
 
 
