@@ -11,8 +11,9 @@ from aerial_gym import AERIAL_GYM_ROOT_DIR
 
 THIN_SEMANTIC_ID = 1
 TREE_SEMANTIC_ID = 2
-OBJECT_SEMANTIC_ID = 1
+OBJECT_SEMANTIC_ID = 3
 WALL_SEMANTIC_ID = 8
+TOMATO_SEMANTIC_ID = 4
 
 class AerialRobotWithObstaclesCfg(BaseConfig):
     seed = 1
@@ -378,7 +379,6 @@ class AerialRobotWithObstaclesCfg(BaseConfig):
         specific_filepath = "cube.urdf"
         semantic_id = WALL_SEMANTIC_ID
         color = [180, 100, 150]
-
 
 
     class asset_config:

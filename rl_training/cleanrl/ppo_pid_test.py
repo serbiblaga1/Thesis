@@ -212,9 +212,9 @@ def get_args():
             "help": "the surrogate clipping coefficient"},
         {"name": "--clip-vloss", "action": "store_true", "default": False,
             "help": "Toggles whether or not to use a clipped loss for the value function, as per the paper."},
-        {"name": "--ent-coef", "type":float, "default": 0.0,
+        {"name": "--ent-coef", "type":float, "default": 0.01,
             "help": "coefficient of the entropy"},
-        {"name": "--vf-coef", "type":float, "default": 2,
+        {"name": "--vf-coef", "type":float, "default": 1,
             "help": "coefficient of the value function"},
         {"name": "--max-grad-norm", "type":float, "default": 1,
             "help": "the maximum norm for the gradient clipping"},
@@ -322,14 +322,14 @@ class Agent(nn.Module):
 
     def get_action_and_value(self, x, action=None):
         action_mean = self.actor_mean(x)
-        action_mean = torch.tanh(action_mean) * 0.01
+        action_mean = torch.tanh(action_mean)
         action_logstd = self.actor_logstd.expand_as(action_mean)
         action_std = torch.exp(action_logstd)
         probs = Normal(action_mean, action_std)
 
         if action is None:
             action = probs.sample()
-        action = torch.clamp(action, -0.5, 0.5)
+        action = torch.clamp(action, -0.7, 0.7)
         return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
 
 
