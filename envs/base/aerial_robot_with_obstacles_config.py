@@ -12,7 +12,7 @@ from aerial_gym import AERIAL_GYM_ROOT_DIR
 THIN_SEMANTIC_ID = 1
 TREE_SEMANTIC_ID = 2
 OBJECT_SEMANTIC_ID = 3
-WALL_SEMANTIC_ID = 8
+WALL_SEMANTIC_ID = 5
 TOMATO_SEMANTIC_ID = 4
 
 class AerialRobotWithObstaclesCfg(BaseConfig):
@@ -259,8 +259,8 @@ class AerialRobotWithObstaclesCfg(BaseConfig):
 
         collision_mask = 1  # objects with the same collision mask will not collide
         
-        min_position_ratio = [0.5, -1.5, 0.5]  # min position as a ratio of the bounds
-        max_position_ratio = [0.5, -1.5, 0.5]  # max position as a ratio of the bounds
+        min_position_ratio = [0.5, 2.5, 0.5]  # min position as a ratio of the bounds
+        max_position_ratio = [0.5, 2.5, 0.5]  # max position as a ratio of the bounds
 
         specified_positions = [[-1000.0, -1000.0, -1000.0]]  # if > -900, use this value instead of randomizing the ratios
 
@@ -280,8 +280,8 @@ class AerialRobotWithObstaclesCfg(BaseConfig):
 
         collision_mask = 1  # objects with the same collision mask will not collide
 
-        min_position_ratio = [0.5, 2.5, 0.5]  # min position as a ratio of the bounds
-        max_position_ratio = [0.5, 2.5, 0.5]  # max position as a ratio of the bounds
+        min_position_ratio = [0.5, -1.5, 0.5]  # min position as a ratio of the bounds
+        max_position_ratio = [0.5, -1.5, 0.5]  # max position as a ratio of the bounds
 
         specified_positions = [[-1000.0, -1000.0, -1000.0]]  # if > -900, use this value instead of randomizing the ratios
 
@@ -343,8 +343,8 @@ class AerialRobotWithObstaclesCfg(BaseConfig):
 
         collision_mask = 1  # objects with the same collision mask will not collide
 
-        min_position_ratio = [2, 0.5, 0.5]  # min position as a ratio of the bounds
-        max_position_ratio = [2, 0.5, 0.5]  # max position as a ratio of the bounds
+        min_position_ratio = [2.5, 0.5, 0.5]  # min position as a ratio of the bounds
+        max_position_ratio = [2.5, 0.5, 0.5]  # max position as a ratio of the bounds
 
         specified_positions = [[-1000.0, -1000.0, -1000.0]]  # if > -900, use this value instead of randomizing the ratios
 
@@ -380,6 +380,227 @@ class AerialRobotWithObstaclesCfg(BaseConfig):
         semantic_id = WALL_SEMANTIC_ID
         color = [180, 100, 150]
 
+    class tomato_asset_params(asset_state_params):
+        num_assets = 4  # Number of tomato plants in the scene
+
+        collision_mask = 1  # Prevents self-collisions with other tomato plants
+
+        # Positioning - Defines locations for 4 tomato plants
+        max_position_ratio = [0.95, 0.95, 0.1]  # Max position ratios
+        min_position_ratio = [0.05, 0.05, 0.0]  # Min position ratios
+
+        specified_positions = [
+            [1.0, 2.5, 0.15],  # Front (slightly raised)
+            [-1.5, -6.0, 0.2], # Back
+            [4.5, 1.5, 0.2],  # Right
+            [-3.5, -1.0, 0.2]  # Left
+        ]  # Fixed positions for consistency
+
+        # Euler Angles - Defines orientation (rotation)
+        min_euler_angles = [0, -np.pi / 12.0, -np.pi / 2]  # Min angles
+        max_euler_angles = [0, np.pi / 12.0, np.pi / 2]  # Max angles
+
+        specified_euler_angles = [
+            [0.0, 0.0, 0.0],  # Front
+            [0.0, 0.0, 0.0],  # Back
+            [0.0, 0.0, 0.0],  # Right
+            [0.0, 0.0, 0.0]   # Left
+        ]  # Keeping all upright
+
+        collapse_fixed_joints = True  # No movement required
+        links_per_asset = 1  # One model per tomato plant
+        set_whole_body_semantic_mask = False
+        set_semantic_mask_per_link = True
+        semantic_mask_link_list = []  # Label all links
+        semantic_id = TOMATO_SEMANTIC_ID  # Assign unique ID
+
+        color = [200, 30, 30]  # **Tomato Plant Color** (Red-Green Mix)
+
+    class inner_wall(asset_state_params):
+        num_assets = 67  # Number of maze walls
+
+        collision_mask = 1  
+
+        specified_positions = [
+            [0.0, -1, 0.5],  # r
+            [0.0, 1, 0.5],   # r
+            [2.5, 3.5, 0.5],
+            [2.5, -3.5, 0.5],
+            [-5, -1, 0.5],  # r
+            [-5, 1, 0.5],   # r
+            [5, 3.5, 0.5],
+            [5, -3.5, 0.5], 
+            [7.5, -1, 0.5],  # r
+            [7.5, 1, 0.5],   # r
+            [5, 8.5, 0.5],
+            [5, 11, 0.5],
+            [2.5, 8.5, 0.5],
+            [2.5, 13.5, 0.5],
+            [5, 16, 0.5],      # r
+            [7.5, 13.5, 0.5],  # r
+            [10.0, 13.5, 0.5], # r
+            [10.0, 16.0, 0.5], # r
+            [12.5, 16.0, 0.5], # r
+            [15.0, 13.5, 0.5],
+            [12.5, 11.0, 0.5],
+            [15.0, 11.0, 0.5],
+            [12.5, 8.5, 0.5],
+            [15.0, 8.5, 0.5],
+            [17.5, 6.0, 0.5],   # r
+            [20.0, 3.5, 0.5],
+            [12.5, 6.0, 0.5],
+            [15.0, 3.5, 0.5],   # r
+            [20.0, -1.5, 0.5],
+            [20.0, -6.5, 0.5],
+            [12.5, 1, 0.5],
+            [15, -1.5, 0.5],
+            [10, -1, 0.5],
+            [12.5, -3.5, 0.5],
+            [17.5, 1, 0.5],
+            [17.5, -4, 0.5],
+            [15, -4, 0.5],
+            [20, -11.5, 0.5],
+            [20, -16.5, 0.5],
+            [17.5, -11.5, 0.5],
+            [15, -11.5, 0.5],
+            [17.5, -19, 0.5],
+            [12.5, -8.5, 0.5],
+            [12.5, -11, 0.5],
+            [5, -8.5, 0.5],
+            [5, -11, 0.5],
+            [10, -13.5, 0.5],
+            [7.5, -13.5, 0.5],
+            [2.5, -8.5, 0.5],
+            [2.5, -11, 0.5],
+            [12.5, -19, 0.5], 
+            [7.5, -19, 0.5],
+            [2.5, -19, 0.5],
+            [-2.5, -19, 0.5],
+            [-7.5, -19, 0.5],
+            [17.5, -14, 0.5],
+            [15, -14, 0.5],
+            [0, -13.5, 0.5],
+            [-5, -13.5, 0.5],
+            [-7.5, -3.5, 0.5],
+            [-7.5, -8.5, 0.5],
+            [-7.5, -11, 0.5],
+            [-7.5, 1, 0.5],
+            [-10, -1.5, 0.5],
+            [-10, -6.5, 0.5],
+            [-10, -11.5, 0.5],
+            [-10, -16.5, 0.5]
+
+        ]
+
+
+        min_euler_angles = [0.0, 0.0, 0.0]  # min euler angles
+        max_euler_angles = [0.0, 0.0, 0.0]  # max euler angles
+
+        specified_euler_angles = [
+            [0.0, 0.0, np.pi/2],  
+            [0.0, 0.0, np.pi/2],  
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, np.pi/2],  
+            [0.0, 0.0, np.pi/2],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, np.pi/2],  
+            [0.0, 0.0, np.pi/2], 
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, np.pi/2],
+            [0.0, 0.0, np.pi/2],
+            [0.0, 0.0, np.pi/2], 
+            [0.0, 0.0, np.pi/2],
+            [0.0, 0.0, np.pi/2],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, np.pi/2],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, np.pi/2],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, np.pi/2],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, np.pi/2],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, np.pi/2],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, np.pi/2],
+            [0.0, 0.0, np.pi/2],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, np.pi/2],
+            [0.0, 0.0, np.pi/2],
+            [0.0, 0.0, np.pi/2],
+            [0.0, 0.0, np.pi/2],
+            [0.0, 0.0, np.pi/2],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, np.pi/2],
+            [0.0, 0.0, np.pi/2],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, np.pi/2],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            
+        ]
+
+        collapse_fixed_joints = False
+        links_per_asset = 1
+        specific_filepath = "wall.urdf"  
+        semantic_id = WALL_SEMANTIC_ID
+        color = [100, 100, 100] 
+
+
+    class inner_small_wall(asset_state_params):
+        num_assets = 3  # Number of maze walls
+
+        collision_mask = 1  
+
+        specified_positions = [
+            [16, -6.5, 0.5],
+            [16, -9, 0.5],
+            [16, -16.5, 0.5]
+ 
+        ]
+
+        min_euler_angles = [0.0, 0.0, 0.0]  # min euler angles
+        max_euler_angles = [0.0, 0.0, 0.0]  # max euler angles
+
+        specified_euler_angles = [
+            [0.0, 0.0, np.pi/2],  
+            [0.0, 0.0, np.pi/2],  
+            [0.0, 0.0, np.pi/2],  
+        ]
+        collapse_fixed_joints = False
+        links_per_asset = 1
+        specific_filepath = "wall.urdf"  
+        semantic_id = WALL_SEMANTIC_ID
+        color = [100, 100, 100] 
+
+
 
     class asset_config:
         folder_path = f"{AERIAL_GYM_ROOT_DIR}/resources/models/environment_assets"
@@ -387,16 +608,19 @@ class AerialRobotWithObstaclesCfg(BaseConfig):
         include_asset_type = {
             "thin": False,
             "trees": False,
-            "objects": True
+            "objects": False,
+            "tomatoes": False
         }
 
         include_env_bound_type = {
-            "front_wall": True,
-            "left_wall": True,
+            "front_wall": False,
+            "left_wall": False,
             "top_wall": False,
-            "back_wall": True,
-            "right_wall": True,
-            "bottom_wall": False
+            "back_wall": False,
+            "right_wall": False,
+            "bottom_wall": False,
+            "inner_wall": True,
+            "inner_small_wall": True
         }
 
         env_lower_bound_min = [-5.0, -5.0, 0.0]  # lower bound for the environment space

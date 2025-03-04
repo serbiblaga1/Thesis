@@ -192,29 +192,29 @@ def get_args():
         # Algorithm specific arguments
         {"name": "--total-timesteps", "type":int, "default": 30000000,
             "help": "total timesteps of the experiments"},
-        {"name": "--learning-rate", "type":float, "default": 0.0026,
+        {"name": "--learning-rate", "type":float, "default": 0.0015,
             "help": "the learning rate of the optimizer"},
         {"name": "--num-steps", "type":int, "default": 16,
             "help": "the number of steps to run in each environment per policy rollout"},
         {"name": "--anneal-lr", "action": "store_true", "default": False,
             "help": "Toggle learning rate annealing for policy and value networks"},
-        {"name": "--gamma", "type":float, "default": 0.99,
+        {"name": "--gamma", "type":float, "default": 0.98,
             "help": "the discount factor gamma"},
         {"name": "--gae-lambda", "type":float, "default": 0.95,
             "help": "the lambda for the general advantage estimation"},
         {"name": "--num-minibatches", "type":int, "default": 2,
             "help": "the number of mini-batches"},
-        {"name": "--update-epochs", "type":int, "default": 4,
+        {"name": "--update-epochs", "type":int, "default": 6,
             "help": "the K epochs to update the policy"},
         {"name": "--norm-adv-off", "action": "store_true", "default": False,
             "help": "Toggles advantages normalization"},
-        {"name": "--clip-coef", "type":float, "default": 0.2,
+        {"name": "--clip-coef", "type":float, "default": 0.25,
             "help": "the surrogate clipping coefficient"},
         {"name": "--clip-vloss", "action": "store_true", "default": False,
             "help": "Toggles whether or not to use a clipped loss for the value function, as per the paper."},
-        {"name": "--ent-coef", "type":float, "default": 0.01,
+        {"name": "--ent-coef", "type":float, "default": 0.005,
             "help": "coefficient of the entropy"},
-        {"name": "--vf-coef", "type":float, "default": 1,
+        {"name": "--vf-coef", "type":float, "default": 1.5,
             "help": "coefficient of the value function"},
         {"name": "--max-grad-norm", "type":float, "default": 1,
             "help": "the maximum norm for the gradient clipping"},
@@ -450,8 +450,8 @@ if __name__ == "__main__":
                 depth_images, depth_values = process_depth_images(envs)
                 #display_depth_images(depth_images)
                 min_depths = [torch.amin(torch.tensor(depth, device=device), dim=1) for depth in depth_values]
-                raw_altitude = min_depths[4].min(dim=-1).values.squeeze()
-                distance_front = min_depths[0].min(dim=-1).values.squeeze()  # Front ToF distance
+                raw_altitude = torch.amin(torch.tensor(depth_values[4], device=device)[:, 3:5, 3:5], dim=(1, 2)).squeeze()
+                distance_front = min_depths[0].min(dim=-1).values.squeeze() 
                 distance_back = min_depths[1].min(dim=-1).values.squeeze()
                 distance_left = min_depths[2].min(dim=-1).values.squeeze()
                 distance_right = min_depths[3].min(dim=-1).values.squeeze()
@@ -498,15 +498,13 @@ if __name__ == "__main__":
                 distance_right_log.append(distance_right[0].cpu().numpy())
 
                 altitude_error = initial_tof - envs.smoothed_altitude
+                # if (torch.abs(altitude_error) <= 0.01).all():
+                #     stable_altitude_counter += 1
+                # else:
+                #     stable_altitude_counter = 0
 
-                if (torch.abs(altitude_error) < 0.01).all():
-
-                    stable_altitude_counter += 1
-                else:
-                    stable_altitude_counter = 0
-
-                if stable_altitude_counter >= 20:
-                    altitude_stable = True
+                # if stable_altitude_counter >= 20:
+                altitude_stable = True
 
                 global_step += 1 * args.num_envs
                 obs[step] = next_obs
@@ -521,24 +519,27 @@ if __name__ == "__main__":
                         value = torch.zeros(args.num_envs, device=device)
 
                     refined_action = torch.zeros((args.num_envs, 4), device=device)
-                    refined_action[..., 0] = pid.compute(altitude_error, dt=0.01)  # PID altitude correction
-                    refined_action[..., 2:] = rl_action  # Use RL for yaw/pitch actions
+                    refined_action[..., 0] = pid.compute(altitude_error, dt=0.01)  
+                    refined_action[..., 2:] = rl_action  
                     values[step] = value.flatten()
 
-                #logged_actions.append(refined_action.clone().cpu())  # Move to CPU for logging
                 actions[step] = refined_action
                 logprobs[step] = logprob
-                #if global_step % plot_update_interval == 0:  # Check if we have logged enough steps
-                #    logged_actions = torch.stack(logged_actions)  # Convert list to tensor
-                #    log_and_plot_actions(logged_actions)  # Call function to plot
 
 
                 # TRY NOT TO MODIFY: execute the game and log data.
                 next_obs, rewards[step], next_done, info = envs.step(actions[step])
-                         # Update the live plot every `plot_update_interval` steps
-                #if global_step % plot_update_interval == 0 and len(corrected_altitude_log) > 1:
-                    #plot_downward_sensor_live(corrected_altitude_log, distance_front_log, distance_left_log, distance_right_log, distance_back_log)
- 
+                
+                    
+                # if envs.collisions.any():  # If any environment has a collision
+                #     for i in range(envs.collisions.shape[0]):  # Loop through all environments
+                #         if envs.collisions[i] > 0:
+                #             print(f"[DEBUG] Collision detected at step {global_step} in environment {i}")
+                #             print(f"Pitch: {next_obs[i, 1].cpu().numpy():.3f}, Yaw Action: {next_obs[i, 2].cpu().numpy():.3f}")
+                #             print(f"Front Distance: {next_obs[i, 5].cpu().numpy():.3f}")
+                #             print(f"Reward at failure: {envs.rew_buf[i].cpu().numpy():.3f}")
+                #             print("-" * 50)
+
                 if 0 <= step <= 2:
                     for idx, d in enumerate(next_done):
                         if d:
