@@ -47,6 +47,8 @@ from torch.utils.tensorboard import SummaryWriter
 from aerial_gym.envs import *
 from aerial_gym.utils import task_registry
 
+
+
 def process_depth_images(env):
     depth_images = []
     depth_values = []
@@ -103,32 +105,14 @@ def log_and_plot_actions(actions):
     plt.show()
 
 def plot_downward_sensor_live(corrected_altitude, obstacle_front, obstacle_left, obstacle_right, obstacle_back, target_altitude=0.375, obstacle_threshold=0.25):
-    """
-    Live-updating plot of downward sensor readings (altitude) with color coding for the first drone [0].
-    
-    - Green: No obstacle detected.
-    - Red: Obstacle detected in any direction (front, left, right, back) (distance ≤ obstacle_threshold).
-    - Dotted black line: Target altitude.
-
-    Args:
-        corrected_altitude (np.array): The altitude readings over time (shape: [steps, num_drones]).
-        obstacle_front (np.array): Front sensor readings over time (shape: [steps, num_drones]).
-        obstacle_left (np.array): Left sensor readings over time (shape: [steps, num_drones]).
-        obstacle_right (np.array): Right sensor readings over time (shape: [steps, num_drones]).
-        obstacle_back (np.array): Back sensor readings over time (shape: [steps, num_drones]).
-        target_altitude (float): The target altitude (default: 0.375m).
-        obstacle_threshold (float): Distance threshold for detecting an obstacle (default: 1.0m).
-    """
     num_steps = len(corrected_altitude)
 
-    # Extract only the first drone's data (drone[0])
     altitude_drone0 = np.array(corrected_altitude)  
     obstacle_front0 = np.array(obstacle_front)  
     obstacle_left0 = np.array(obstacle_left)  
     obstacle_right0 = np.array(obstacle_right)  
     obstacle_back0 = np.array(obstacle_back)  
 
-    # Detect if an obstacle is too close in ANY direction
     obstacle_detected = (
         (obstacle_front0 <= obstacle_threshold) | 
         (obstacle_left0 <= obstacle_threshold) |
@@ -136,39 +120,21 @@ def plot_downward_sensor_live(corrected_altitude, obstacle_front, obstacle_left,
         (obstacle_back0 <= obstacle_threshold)
     )
 
-    plt.clf()  # Clear previous plot
-    plt.figure(1)  # Keep the same figure for live updating
+    plt.clf() 
+    plt.figure(1) 
 
-    # Plot altitude with color-coded obstacle detection
     for i in range(1, num_steps):
-        color = "red" if obstacle_detected[i] else "green"  # Turn red if any obstacle is detected
+        color = "red" if obstacle_detected[i] else "green" 
         plt.plot([i - 1, i], [altitude_drone0[i - 1], altitude_drone0[i]], color=color, linewidth=2)
 
-    # Add target altitude as a dotted line
     plt.axhline(y=target_altitude, color="black", linestyle="dotted", linewidth=2, label="Target Altitude")
 
-    # Labels and legend
     plt.title("Downward Sensor Readings for Drone [0] (Live)")
     plt.xlabel("Time Steps")
     plt.ylabel("Altitude (m)")
     plt.legend(["Target Altitude", "Altitude Before Obstacle", "Altitude After Obstacle"], loc="upper right")
 
     plt.show()
-
-class PIDController:
-    def __init__(self, Kp, Ki, Kd, target_altitude):
-        self.Kp = Kp
-        self.Ki = Ki
-        self.Kd = Kd
-        self.target_altitude = target_altitude
-        self.integral = 0
-        self.prev_error = 0
-
-    def compute(self, error, dt):
-        self.integral += error * dt
-        derivative = (error - self.prev_error) / dt if dt > 0 else 0
-        self.prev_error = error
-        return self.Kp * error + self.Ki * self.integral + self.Kd * derivative
 
 
 def get_args():
@@ -192,33 +158,33 @@ def get_args():
         # Algorithm specific arguments
         {"name": "--total-timesteps", "type":int, "default": 30000000,
             "help": "total timesteps of the experiments"},
-        {"name": "--learning-rate", "type":float, "default": 0.0015,
+        {"name": "--learning-rate", "type":float, "default": 2e-4,
             "help": "the learning rate of the optimizer"},
         {"name": "--num-steps", "type":int, "default": 16,
             "help": "the number of steps to run in each environment per policy rollout"},
         {"name": "--anneal-lr", "action": "store_true", "default": False,
             "help": "Toggle learning rate annealing for policy and value networks"},
-        {"name": "--gamma", "type":float, "default": 0.98,
+        {"name": "--gamma", "type":float, "default": 0.99,
             "help": "the discount factor gamma"},
-        {"name": "--gae-lambda", "type":float, "default": 0.95,
+        {"name": "--gae-lambda", "type":float, "default": 0.99,
             "help": "the lambda for the general advantage estimation"},
-        {"name": "--num-minibatches", "type":int, "default": 2,
+        {"name": "--num-minibatches", "type":int, "default": 4,
             "help": "the number of mini-batches"},
-        {"name": "--update-epochs", "type":int, "default": 6,
+        {"name": "--update-epochs", "type":int, "default": 3,
             "help": "the K epochs to update the policy"},
         {"name": "--norm-adv-off", "action": "store_true", "default": False,
             "help": "Toggles advantages normalization"},
-        {"name": "--clip-coef", "type":float, "default": 0.25,
+        {"name": "--clip-coef", "type":float, "default": 0.07,
             "help": "the surrogate clipping coefficient"},
-        {"name": "--clip-vloss", "action": "store_true", "default": False,
+        {"name": "--clip-vloss", "action": "store_true", "default": True,
             "help": "Toggles whether or not to use a clipped loss for the value function, as per the paper."},
-        {"name": "--ent-coef", "type":float, "default": 0.005,
+        {"name": "--ent-coef", "type":float, "default": 0.01,
             "help": "coefficient of the entropy"},
-        {"name": "--vf-coef", "type":float, "default": 1.5,
+        {"name": "--vf-coef", "type":float, "default": 1,
             "help": "coefficient of the value function"},
-        {"name": "--max-grad-norm", "type":float, "default": 1,
+        {"name": "--max-grad-norm", "type":float, "default": 0.7,
             "help": "the maximum norm for the gradient clipping"},
-        {"name": "--target-kl", "type":float, "default": None,
+        {"name": "--target-kl", "type":float, "default": 0.02 ,
             "help": "the target KL divergence threshold"},
         ]
 
@@ -329,7 +295,7 @@ class Agent(nn.Module):
 
         if action is None:
             action = probs.sample()
-        action = torch.clamp(action, -0.7, 0.7)
+        #action = torch.clamp(action, -0.7, 0.7)
         return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
 
 
@@ -440,11 +406,10 @@ if __name__ == "__main__":
     if not args.play:
         for update in range(1, num_updates + 1):
             previous_altitude = torch.zeros(args.num_envs, device=device)
-            # Annealing the rate if instructed to do so.
-            if args.anneal_lr:
-                frac = 1.0 - (update - 1.0) / num_updates
-                lrnow = frac * args.learning_rate
-                optimizer.param_groups[0]["lr"] = lrnow
+
+            frac = 1.0 - (update - 1.0) / num_updates
+            lrnow = frac * args.learning_rate
+            optimizer.param_groups[0]["lr"] = lrnow
 
             for step in range(0, args.num_steps):
                 depth_images, depth_values = process_depth_images(envs)
@@ -460,7 +425,8 @@ if __name__ == "__main__":
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                      break  
                 
-                corrected_altitude = torch.clamp(raw_altitude * torch.cos(next_obs[..., 1] * np.pi), max=4.0)
+                corrected_altitude = torch.clamp(raw_altitude * torch.cos(next_obs[..., 0] * np.pi), max=4.0)
+                
                 alpha_min = 0.05  
                 alpha_max = 0.3  
                 error_threshold = 0.005  
@@ -498,17 +464,15 @@ if __name__ == "__main__":
                 distance_right_log.append(distance_right[0].cpu().numpy())
 
                 altitude_error = initial_tof - envs.smoothed_altitude
-                # if (torch.abs(altitude_error) <= 0.01).all():
-                #     stable_altitude_counter += 1
-                # else:
-                #     stable_altitude_counter = 0
-
-                # if stable_altitude_counter >= 20:
+                
                 altitude_stable = True
 
                 global_step += 1 * args.num_envs
                 obs[step] = next_obs
                 dones[step] = next_done
+
+                #if global_step >= 250000:
+                    #envs.plot_rewards()
 
                 with torch.no_grad():
                     if altitude_stable:
@@ -529,35 +493,26 @@ if __name__ == "__main__":
 
                 # TRY NOT TO MODIFY: execute the game and log data.
                 next_obs, rewards[step], next_done, info = envs.step(actions[step])
-                
                     
-                # if envs.collisions.any():  # If any environment has a collision
-                #     for i in range(envs.collisions.shape[0]):  # Loop through all environments
-                #         if envs.collisions[i] > 0:
-                #             print(f"[DEBUG] Collision detected at step {global_step} in environment {i}")
-                #             print(f"Pitch: {next_obs[i, 1].cpu().numpy():.3f}, Yaw Action: {next_obs[i, 2].cpu().numpy():.3f}")
-                #             print(f"Front Distance: {next_obs[i, 5].cpu().numpy():.3f}")
-                #             print(f"Reward at failure: {envs.rew_buf[i].cpu().numpy():.3f}")
-                #             print("-" * 50)
+                # if global_step % 1000 == 0:
+                #     print(f"Step {global_step}: Observations: {envs.obs_buf[0].cpu().numpy()}")
+                #if 0 <= step <= 2:
+                for idx, d in enumerate(next_done):
+                            if d:
+                                episodic_return = info["r"][idx].item()
+                                episodic_length = info["l"][idx].item()
 
-                if 0 <= step <= 2:
-                    for idx, d in enumerate(next_done):
-                        if d:
-                            episodic_return = info["r"][idx].item()
-                            episodic_length = info["l"][idx].item()
-                            
-                            # Skip logging for episodes with a length of 1
-                            if episodic_length > 1:
-                                print(f"global_step={global_step}, episodic_return={episodic_return}, episodic_length={episodic_length}")
-                                writer.add_scalar("charts/episodic_return", episodic_return, global_step)
-                                writer.add_scalar("charts/episodic_length", episodic_length, global_step)
-                                
-                                if "consecutive_successes" in info:  # ShadowHand and AllegroHand metric
-                                    writer.add_scalar(
-                                        "charts/consecutive_successes", info["consecutive_successes"].item(), global_step
-                                    )
+                                if episodic_length > 1:
+                                    print(f"global_step={global_step}, episodic_return={episodic_return}, episodic_length={episodic_length}")
+                                    writer.add_scalar("charts/episodic_return", episodic_return, global_step)
+                                    writer.add_scalar("charts/episodic_length", episodic_length, global_step)
+                                    
+                                    if "consecutive_successes" in info:  # ShadowHand and AllegroHand metric
+                                        writer.add_scalar(
+                                            "charts/consecutive_successes", info["consecutive_successes"].item(), global_step
+                                        )
 
-                            break
+                                break
 
 
             # bootstrap value if not done
@@ -615,6 +570,8 @@ if __name__ == "__main__":
 
                     # Value loss
                     newvalue = newvalue.view(-1)
+                    args.clip_vloss = True
+                   
                     if args.clip_vloss:
                         v_loss_unclipped = (newvalue - b_returns[mb_inds]) ** 2
                         v_clipped = b_values[mb_inds] + torch.clamp(

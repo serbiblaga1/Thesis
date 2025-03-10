@@ -173,7 +173,7 @@ class AerialRobotWithObstaclesCfg(BaseConfig):
         color = [70, 200, 100]
 
     class object_asset_params(asset_state_params):
-        num_assets = 27  # Increased to 10 assets
+        num_assets = 37  # Increased to 10 assets
 
         # Setting both min and max position ratio to the same values for specified positions
         max_position_ratio = [0.5, 0.5, 0.5]  
@@ -209,7 +209,19 @@ class AerialRobotWithObstaclesCfg(BaseConfig):
             [-6.0, -8.0, 0.9],   # Asset 25 (new, close)
             [-7.0, -6.0, 1.0],   # Asset 26 (new, close)
             [7.5, -9.0, 1.0],    # Asset 27 (new, close)
+            [11.0, -7.0, 1.2],   # Asset 28 (new)
+            [-14.0, 9.0, 0.8],   # Asset 29 (new)
+            [3.0, -14.0, 1.0],   # Asset 30 (new)
+            [-9.0, 6.0, 1.5],    # Asset 31 (new)
+            [16.0, -3.0, 1.3],   # Asset 32 (new)
+            [9.0, 14.0, 0.9],    # Asset 33 (new)
+            [-3.0, -12.0, 1.0],  # Asset 34 (new)
+            [-17.0, 4.0, 1.1],   # Asset 35 (new)
+            [5.0, -16.0, 1.2],   # Asset 36 (new)
+            [13.0, -2.0, 0.7]   # Asset 37 (new)
+
         ]
+
 
         specified_euler_angles = [
             [0.0, 0.0, 0.0],    # Asset 1
@@ -222,23 +234,34 @@ class AerialRobotWithObstaclesCfg(BaseConfig):
             [0.0, 0.0, 0.0],    # Asset 8
             [0.0, 0.0, 0.0],    # Asset 9
             [0.0, 0.0, 0.0],    # Asset 10
-            [10.0, 0.0, 0.0],   # Asset 11
-            [0.0, 15.0, 0.0],   # Asset 12
-            [0.0, 0.0, 30.0],   # Asset 13
-            [5.0, 10.0, 0.0],   # Asset 14
-            [0.0, 0.0, 45.0],   # Asset 15
-            [20.0, 0.0, 0.0],   # Asset 16
-            [0.0, 25.0, 0.0],   # Asset 17
-            [0.0, 0.0, 90.0],   # Asset 18
-            [0.0, 10.0, 20.0],  # Asset 19
-            [15.0, 0.0, 30.0],  # Asset 20
-            [5.0, 5.0, 5.0],    # Asset 21
-            [10.0, 0.0, 15.0],  # Asset 22
-            [0.0, 0.0, 0.0],    # Asset 23 (new, close)
-            [5.0, 15.0, 10.0],  # Asset 24 (new, close)
-            [0.0, 0.0, 30.0],   # Asset 25 (new, close)
-            [10.0, 0.0, 10.0],  # Asset 26 (new, close)
-            [15.0, 5.0, 5.0],   # Asset 27 (new, close)
+            [0.0, 0.0, 0.0],    # Asset 1
+            [0.0, 0.0, 0.0],    # Asset 2
+            [0.0, 0.0, 0.0],    # Asset 3
+            [0.0, 0.0, 0.0],    # Asset 4
+            [0.0, 0.0, 0.0],    # Asset 5
+            [0.0, 0.0, 0.0],    # Asset 6
+            [0.0, 0.0, 0.0],    # Asset 7
+            [0.0, 0.0, 0.0],    # Asset 8
+            [0.0, 0.0, 0.0],    # Asset 9
+            [0.0, 0.0, 0.0],    # Asset 10
+            [0.0, 0.0, 0.0],    # Asset 1
+            [0.0, 0.0, 0.0],    # Asset 2
+            [0.0, 0.0, 0.0],    # Asset 3
+            [0.0, 0.0, 0.0],    # Asset 4
+            [0.0, 0.0, 0.0],    # Asset 5
+            [0.0, 0.0, 0.0],    # Asset 6
+            [0.0, 0.0, 0.0],    # Asset 7
+            [0.0, 0.0, 0.0],    # Asset 8
+            [0.0, 0.0, 0.0],    # Asset 9
+            [0.0, 0.0, 0.0],    # Asset 10
+            [0.0, 0.0, 0.0],    # Asset 1
+            [0.0, 0.0, 0.0],    # Asset 2
+            [0.0, 0.0, 0.0],    # Asset 3
+            [0.0, 0.0, 0.0],    # Asset 4
+            [0.0, 0.0, 0.0],    # Asset 5
+            [0.0, 0.0, 0.0],    # Asset 6
+            [0.0, 0.0, 0.0]    # Asset 7
+
         ]
 
 
@@ -608,19 +631,19 @@ class AerialRobotWithObstaclesCfg(BaseConfig):
         include_asset_type = {
             "thin": False,
             "trees": False,
-            "objects": False,
+            "objects": True,
             "tomatoes": False
         }
 
         include_env_bound_type = {
-            "front_wall": False,
-            "left_wall": False,
+            "front_wall": True,
+            "left_wall": True,
             "top_wall": False,
-            "back_wall": False,
-            "right_wall": False,
+            "back_wall": True,
+            "right_wall": True,
             "bottom_wall": False,
-            "inner_wall": True,
-            "inner_small_wall": True
+            "inner_wall": False,
+            "inner_small_wall": False
         }
 
         env_lower_bound_min = [-5.0, -5.0, 0.0]  # lower bound for the environment space
